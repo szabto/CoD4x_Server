@@ -36,9 +36,9 @@
 class AdminCmds
 {
   public:
-    static void Kick(const char* cmdname);
-    static void TempBan(const char* cmdname);
-    static void PlayerList(const char* cmdname);
+    static void Kick(const char* rawmsg, int slot);
+    static void TempBan(const char* rawmsg, int slot);
+    static void PlayerList(const char* rawmsg, int slot);
     static void SM_Chat(const char* line, int clnum);
     static void SM_PSay(const char* msg, int source);
 };
@@ -64,19 +64,112 @@ static parameters_t paramters;
 
 static int serverport;
 
-void AdminCmds::Kick(const char* cmdname)
+void AdminCmds::Kick(const char* rawmsg, int slot)
 {
+  char kickreason[256];
+  char psti[128];
+  char dropmsg[MAX_STRING_CHARS];
 
+  Cmd_TokenizeString(rawmsg);
+
+  if(Cmd_Argc() < 2)
+  {
+    Plugin_ChatPrintf(slot, "Usage: !k|!kick @@player");
+    return;
+  }
+  client_t* cl = Plugin_SV_Cmd_GetPlayerClByHandle(Cmd_Argv(1));
+
+  if(cl == NULL)
+  {
+    Plugin_ChatPrintf(slot, "No player for %s found", Cmd_Argv(0));
+    return;
+  }
+  if(cl->state < CS_ACTIVE)
+  {
+    Plugin_ChatPrintf(slot, "Player %s is not in active", cl->name);
+    return;
+  }
+
+  int destination = NUMFORCLIENT(cl);
+
+  if(slot == destination)
+  {
+      Plugin_ChatPrintf(slot, "Why would you kick yourself?");
+      return;
+  }
+
+  kickreason[0] = 0;
+
+  if (Cmd_Argc() > 2)
+  {
+    for(i = 2; i < Cmd_Argc(); ++i)
+    {
+      Q_strcat(kickreason, 256, Cmd_Argv(i));
+      Q_strcat(kickreason, 256, " ");
+    }
+  }
+  else
+  {
+    Q_strncpyz(kickreason, "The admin has no reason given", 256);
+  }
+
+  if(strlen(kickreason) >= 256 )
+  {
+    Com_Printf("Error: You have exceeded the maximum allowed length of 126 for the reason\n");
+    Plugin_ChatPrintf(slot, "Max reason length exceeded.");
+    return;
+  }
+
+  Com_sprintf(dropmsg, sizeof(dropmsg), "Player kicked:\nReason for this kick:\n%s", kickreason);
+
+  if(Plugin_CanPlayerUseCommand(clnum, "k") || Plugin_CanPlayerUseCommand(clnum, "kick"))
+  {
+    SV_SApiSteamIDToString(cl->playerid, psti, sizeof(psti));
+    Com_Printf( "Player kicked: %s ^7id: %s\nReason: %s\n", cl->name, psti, kickreason);
+    SV_PrintAdministrativeLog( "kicked player: %s^7 id: %s with the following reason: %s", cl->name, psti, kickreason);
+
+    SV_DropClient(cl.cl, dropmsg);
+  }
+  else
+  {
+    Com_Printf("Error: Player tried to kick somebody without permission!\n");
+    Plugin_ChatPrintf(slot, "Operation not permitted!");
+  }
 }
 
-void AdminCmds::TempBan(const char* cmdname)
+void AdminCmds::TempBan(const char* rawmsg, int slot)
 {
+  Cmd_TokenizeString(rawmsg);
 
+  if(Cmd_Argc() < 2)
+  {
+    Plugin_ChatPrintf(slot, "Usage: !tb|!tempban @@player");
+    return;
+  }
+  client_t* cl = Plugin_SV_Cmd_GetPlayerClByHandle(Cmd_Argv(1));
+
+  if(cl == NULL)
+  {
+    Plugin_ChatPrintf(slot, "No player for %s found", Cmd_Argv(0));
+    return;
+  }
+  if(cl->state < CS_ACTIVE)
+  {
+    Plugin_ChatPrintf(slot, "Player %s is not in active", cl->name);
+    return;
+  }
+
+  int destination = NUMFORCLIENT(cl);
+
+  if(slot == destination)
+  {
+      Plugin_ChatPrintf(slot, "Why would you ban to yourself?");
+      return;
+  }
 }
 
-void AdminCmds::PlayerList(const char* cmdname)
+void AdminCmds::PlayerList(const char* rawmsg, int slot)
 {
-
 }
 
 void AdminCmds::SM_Chat(const char* line, int clnum)
@@ -142,13 +235,6 @@ void AdminCmds::SM_PSay(const char* msg, int source)
     return;
   }
 
-  message[0] = '\0';
-  for(i = 1; i < Cmd_Argc(); ++i)
-  {
-    Q_strcat(message, sizeof(message), Cmd_Argv(i));
-    Q_strcat(message, sizeof(message), " ");
-  }
-
   int destination = NUMFORCLIENT(cl);
 
   if(source == destination)
@@ -175,25 +261,15 @@ void ParseChatCmd(const char* message, int slot)
   Cmd_TokenizeString(message);
   cmd = Cmd_Argv(0);
   
-  //Compare with long commands
+  //Compare with long and shor commands
   for(i = 0; i < sizeof(chatcmds) / sizeof(chatcmdlist_t); ++i)
   {
-    if(Q_stricmp(cmd, chatcmds[i].name) == 0)
+    if(Q_stricmp(cmd, chatcmds[i].name) == 0 || Q_stricmp(cmd, chatcmds[i].shortname) == 0)
     {
-      chatcmds[i].far(chatcmds[i].name);
+      chatcmds[i].far(cmd, slot);
       return;
     }
   }
-  //Maybe it is a short command
-  for(i = 0; i < sizeof(chatcmds) / sizeof(chatcmdlist_t); ++i)
-  {
-    if(Q_stricmp(cmd, chatcmds[i].shortname) == 0)
-    {
-      chatcmds[i].far(chatcmds[i].name);
-      return;
-    }
-  }
-
 }
 
 
